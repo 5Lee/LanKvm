@@ -1,0 +1,13 @@
+.DS_Store
+._*
+app/mac/build/
+app/win/build/
+app/win/LanKvm.exe
+__pycache__/
+*.log
+.env
+.env.*
+*.p12
+*.pfx
+*.pem
+token.txt

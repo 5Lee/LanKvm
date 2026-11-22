@@ -1,0 +1,11 @@
+- insert:
+    - id: dsh-lan-kvm
+      name: '@local/dsh-lan-kvm'
+      config:
+        clipboard:
+          enabled: true
+          # Trusted-LAN defaults; raise or lower to taste.
+          textLimitBytes: 33554432
+          imageLimitBytes: 67108864
+          # Total size of one file-copy payload (all files combined).
+          fileLimitBytes: 134217728
