@@ -40,7 +40,7 @@ extension KvmHelper {
         let hotkey = CGEvent(keyboardEventSource: nil, virtualKey: 40, keyDown: true)!
         hotkey.flags = [.maskControl, .maskAlternate, .maskCommand]
         _ = handleTap(type: .keyDown, event: hotkey)
-        precondition(!active && sentKeys.isEmpty && sentModifiers.isEmpty && pressedButtons.isEmpty)
+        precondition(!active && heldKeys.isEmpty && sentModifiers.isEmpty && pressedButtons.isEmpty)
     }
 }
 KvmHelper().checkCameraDrag()
@@ -73,3 +73,56 @@ extension KvmHelper {
     }
 }
 KvmHelper().checkModifiers()
+
+extension KvmHelper {
+    static func checkMissingKeyUp() {
+        var physical: Set<CGKeyCode> = []
+        let helper = KvmHelper(hardwareKeyDown: { physical.contains($0) })
+        helper.active = true
+        func key(_ code: CGKeyCode, down: Bool, repeating: Bool = false) {
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
+            event.setIntegerValueField(.keyboardEventAutorepeat, value: repeating ? 1 : 0)
+            _ = helper.handleTap(type: down ? .keyDown : .keyUp, event: event)
+        }
+
+        emit(["check": "missing-up"])
+        physical = [13, 2] // W and D
+        key(13, down: true)
+        key(2, down: true)
+        key(13, down: true, repeating: true)
+        physical.remove(13) // Intentionally withhold the W key-up callback.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+        precondition(helper.active && helper.heldKeys == [2: 68])
+        key(13, down: true, repeating: true) // A late repeat must not relatch W.
+        key(13, down: false)                // A late up must not release D.
+        physical.insert(13)
+        key(13, down: true)
+        key(13, down: true)                 // Re-press before the next timer tick.
+        physical.remove(13)
+        _ = helper.handleTap(type: .tapDisabledByTimeout, event: CGEvent(source: nil)!)
+        precondition(helper.heldKeys == [2: 68])
+        physical.remove(2)
+        key(2, down: false)
+        precondition(helper.keyCheckTimer == nil)
+
+        // Hardware polling must preserve software-generated keys and aliases.
+        key(0, down: true)
+        physical = [36, 76] // Return and keypad Enter share VK_RETURN.
+        key(36, down: true)
+        key(76, down: true)
+        physical.remove(36)
+        helper.checkKeyReleases()
+        precondition(helper.heldKeys == [0: 65, 76: 13])
+        physical.remove(76)
+        key(76, down: false)
+        key(0, down: false)
+        // If the initial press was before capture, a real held-key repeat is valid.
+        physical.insert(13)
+        key(13, down: true, repeating: true)
+        physical.remove(13)
+        key(13, down: false)
+        precondition(helper.keyCheckTimer == nil && helper.heldKeys.isEmpty)
+        emit(["check": "end-missing-up"])
+    }
+}
+KvmHelper.checkMissingKeyUp()

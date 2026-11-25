@@ -26,6 +26,26 @@ extension AppController {
         for _ in 0..<100 where !client.streamReady { try await pause(10) }
         precondition(client.streamReady)
         deliver(#"{"type":"active","active":true}"#)
+        consumeHelperOutput(try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2])))
+        flushInput()
+        let defaults = UserDefaults.standard
+        let previousWheelSetting = defaults.object(forKey: "reverseWindowsWheel")
+        defer { defaults.set(previousWheelSetting, forKey: "reverseWindowsWheel") }
+        reverseWindowsWheel = true
+        func scroll(_ delta: Int, horizontal: Bool = false) {
+            deliver("{\"type\":\"wheel\",\"delta\":\(delta),\"horizontal\":\(horizontal)}")
+        }
+        scroll(120)
+        scroll(-240)
+        scroll(120, horizontal: true)
+        toggleWheelDirection()
+        precondition(defaults.object(forKey: "reverseWindowsWheel") as? Bool == false)
+        scroll(120)
+        scroll(-240)
+        scroll(-120, horizontal: true)
+        deliver(#"{"type":"active","active":false}"#)
+        scroll(120)
+        deliver(#"{"type":"active","active":true}"#)
         deliver(#"{"type":"mouse","kind":"down","button":"right"}"#)
         for _ in 0..<2000 {
             deliver(#"{"type":"mouse","kind":"move","dx":2,"dy":-1}"#)

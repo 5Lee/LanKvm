@@ -73,6 +73,7 @@ macOS 把子进程的权限算在**父进程**头上。输入的 helper 是 LanK
 - **鼠标移到 Mac 屏幕边缘** → 自动进入 Windows
 - **移到 Windows 屏幕对应边缘** → 自动回到 Mac
 - 菜单栏可以切换 Windows 在左边/右边/两边，或关闭边缘切换
+- 「Windows 纵向滚轮与 Mac 相反」默认勾选。同样向前转动滚轮，两边页面的上下滚动方向相反。取消勾选即可跟随 Mac，选项即时生效并自动保存。横向滚动沿用原方向。
 - **`⌃⌥⌘K`**（Control+Option+Command+K）→ 立刻交还 Mac
 - 菜单栏 **Return to Mac now** → 同样立刻交还
 

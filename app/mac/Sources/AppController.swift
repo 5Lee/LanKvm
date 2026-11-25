@@ -21,6 +21,7 @@ final class AppController: NSObject {
     private var sentButtons = Set<String>()
     private let helperWriter = DispatchQueue(label: "lankvm.helper.commands")
     private var lockReturn = UserDefaults.standard.bool(forKey: "gameLock")
+    private var reverseWindowsWheel = (UserDefaults.standard.object(forKey: "reverseWindowsWheel") as? Bool) ?? true
     private var diagnostics: DiagnosticLog?
     private var helper: Process?
     private var helperBuffer = Data()
@@ -346,11 +347,12 @@ final class AppController: NSObject {
             }
             inputQueue.append(key)
         } else if type == "wheel" {
-            let delta = (event["delta"] as? NSNumber)?.intValue ?? 0
+            let delta = max(-1200, min(1200, (event["delta"] as? NSNumber)?.intValue ?? 0))
             guard delta != 0 else { return }
+            let horizontal = event["horizontal"] as? Bool == true
             inputQueue.append(["op": "wheel",
-                               "delta": max(-1200, min(1200, delta)),
-                               "horizontal": event["horizontal"] as? Bool == true])
+                               "delta": reverseWindowsWheel && !horizontal ? -delta : delta,
+                               "horizontal": horizontal])
         } else {
             return
         }
@@ -768,6 +770,11 @@ final class AppController: NSObject {
         edgeItem.submenu = submenu
         menu.addItem(edgeItem)
 
+        let wheelItem = NSMenuItem(title: "Windows 纵向滚轮与 Mac 相反", action: #selector(toggleWheelDirection), keyEquivalent: "")
+        wheelItem.target = self
+        wheelItem.state = reverseWindowsWheel ? .on : .off
+        menu.addItem(wheelItem)
+
         let gameItem = NSMenuItem(title: "游戏锁屏（快捷键返回 Mac）", action: #selector(toggleGameLock), keyEquivalent: "")
         gameItem.target = self
         gameItem.state = lockReturn ? .on : .off
@@ -846,6 +853,12 @@ final class AppController: NSObject {
         lockReturn.toggle()
         UserDefaults.standard.set(lockReturn, forKey: "gameLock")
         sendHelper(["action": "lockReturn", "enabled": lockReturn])
+        refreshMenu()
+    }
+
+    @objc private func toggleWheelDirection() {
+        reverseWindowsWheel.toggle()
+        UserDefaults.standard.set(reverseWindowsWheel, forKey: "reverseWindowsWheel")
         refreshMenu()
     }
 

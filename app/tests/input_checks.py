@@ -116,6 +116,17 @@ def run():
         assert observed == expected
         print("PASS standalone Ctrl/Alt, duplicate notifications, shared Ctrl, right-side and missed modifier events")
 
+        start = records.index({"check": "missing-up"}) + 1
+        stop = records.index({"check": "end-missing-up"})
+        key_records = records[start:stop]
+        key_edges = [(87, True), (68, True), (87, True), (87, False),
+                     (87, True), (87, False), (87, True), (87, False), (68, False),
+                     (65, True), (13, True), (13, True), (13, False), (65, False),
+                     (87, True), (87, False)]
+        assert key_records == [dict(type="key", vk=vk, down=down) for vk, down in key_edges]
+        key_stream = tmp / "recovered-keys.jsonl"
+        key_stream.write_text("".join(json.dumps(e) + "\n" for e in key_records))
+
         for _ in range(20):
             http = ThreadingHTTPServer(("127.0.0.1", 0), Http)
             try:
@@ -143,7 +154,7 @@ dispatchMain()
 """)
             compile_swift(tmp / "relay-check", tmp / "main.swift", tmp / "AppController.swift",
                           tmp / "WindowsClient.swift", MAC / "Discovery.swift", MAC / "Settings.swift", MAC / "DiagnosticLog.swift")
-            subprocess.run([tmp / "relay-check", str(http.server_port)], check=True, timeout=30)
+            subprocess.run([tmp / "relay-check", str(http.server_port), key_stream], check=True, timeout=30)
             http.shutdown()
             tcp.shutdown()
         print("PASS delayed cursor bursts, fragmented replies, log rotation and retention")
@@ -151,6 +162,9 @@ dispatchMain()
         assert [e for transport,e in events if transport == "http" and e.get("op") == "key"] == [
             dict(op="key", vk=162, down=True), dict(op="key", vk=162, down=False)]
         assert [e for transport,e in events if transport == "tcp"] == [
+            *[dict(op="key", vk=vk, down=down) for vk, down in key_edges],
+            *[dict(op="wheel", delta=delta, horizontal=horizontal) for delta, horizontal in
+              [(-120, False), (240, False), (120, True), (120, False), (-240, False), (-120, True)]],
             dict(op="down", button="right"), *[dict(op="moveRel", dx=2, dy=-1)] * 2000,
             dict(op="up", button="right"), dict(op="moveRel", dx=150, dy=-100),
             *[dict(op="key", vk=vk, down=down) for vk,down in [
@@ -158,6 +172,8 @@ dispatchMain()
                 (162,True),(162,False),(162,True),(162,False)]],
             dict(op="moveRel", dx=7, dy=2)]
         assert events[-1][1]["op"] == "release"
+        print("PASS missing W release reaches receiver while D stays held; late repeats, re-press and tap recovery")
+        print("PASS reverse and matched vertical wheel, horizontal unchanged, no forwarding on Mac")
         print("PASS anonymous discovery, serialized HTTP, ordered key-up, TCP handshake, 2000 individual right-drag samples, ordinary moves coalesced, motion during pending clipboard transfer, disconnect")
 
 

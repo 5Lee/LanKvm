@@ -203,7 +203,10 @@ final class KvmHelper {
 
     private var heldModifierCodes = Set<Int64>()
     private var sentModifiers = Set<Int>()
-    private var sentKeys = Set<Int>()
+    private var heldKeys: [CGKeyCode: Int] = [:]
+    private var hardwareKeys = Set<CGKeyCode>()
+    private var keyCheckTimer: Timer?
+    private let hardwareKeyDown: (CGKeyCode) -> Bool
     private var pressedButtons = Set<String>()
     private var lockReturn = false
     private var cursorReportTime = -Double.infinity
@@ -217,6 +220,10 @@ final class KvmHelper {
     private var lastClipboardChangeCount = 0
 
     private lazy var clipboard = MacClipboard()
+
+    init(hardwareKeyDown: @escaping (CGKeyCode) -> Bool = { CGEventSource.keyState(.hidSystemState, key: $0) }) {
+        self.hardwareKeyDown = hardwareKeyDown
+    }
 
     func run() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -463,10 +470,13 @@ final class KvmHelper {
                 emit(["type": "mouse", "kind": "up", "button": button])
             }
             pressedButtons.removeAll()
-            for vk in sentKeys.sorted() {
+            keyCheckTimer?.invalidate()
+            keyCheckTimer = nil
+            hardwareKeys.removeAll()
+            for vk in Set(heldKeys.values).sorted() {
                 emit(["type": "key", "vk": vk, "down": false])
             }
-            sentKeys.removeAll()
+            heldKeys.removeAll()
             flushSentModifierUps()
             heldModifierCodes.removeAll()
             showCursor()
@@ -591,8 +601,46 @@ final class KvmHelper {
         }
         syncModifiers(event.flags)
         guard let vk = keyVK(keycode) else { return }
-        if down { sentKeys.insert(vk) } else { sentKeys.remove(vk) }
-        emit(["type": "key", "vk": vk, "down": down])
+        let code = CGKeyCode(keycode)
+        guard down else {
+            releaseKey(code)
+            return
+        }
+        let repeating = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if repeating && heldKeys[code] == nil && !hardwareKeyDown(code) { return }
+        // A fresh press of an already-held physical key implies a missed release.
+        if !repeating && hardwareKeys.contains(code) { releaseKey(code) }
+        heldKeys[code] = vk
+        emit(["type": "key", "vk": vk, "down": true])
+        if !hardwareKeys.contains(code) && hardwareKeyDown(code) {
+            hardwareKeys.insert(code)
+            if keyCheckTimer == nil {
+                let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.checkKeyReleases() }
+                RunLoop.main.add(timer, forMode: .common)
+                keyCheckTimer = timer
+            }
+        }
+    }
+
+    private func releaseKey(_ code: CGKeyCode) {
+        guard let vk = heldKeys.removeValue(forKey: code) else { return }
+        hardwareKeys.remove(code)
+        if hardwareKeys.isEmpty {
+            keyCheckTimer?.invalidate()
+            keyCheckTimer = nil
+        }
+        // Return and keypad Enter, for example, share one Windows virtual key.
+        if !heldKeys.values.contains(vk) {
+            emit(["type": "key", "vk": vk, "down": false])
+        }
+    }
+
+    private func checkKeyReleases() {
+        // Only consult HID for keys actually observed down there. Remapped or
+        // software-generated keys may have no corresponding hardware state.
+        for code in hardwareKeys where !hardwareKeyDown(code) {
+            releaseKey(code)
+        }
     }
 
     private func setClipboardEnabled(_ enabled: Bool) {
@@ -902,6 +950,7 @@ final class KvmHelper {
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            checkKeyReleases()
             return Unmanaged.passUnretained(event)
         }
 
