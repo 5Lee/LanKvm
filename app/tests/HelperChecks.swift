@@ -35,12 +35,12 @@ extension KvmHelper {
         mouse(.rightMouseDown, .right)
         let w = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true)!
         handleKey(event: w, down: true)
-        sentModifiers.insert(162)
+        heldModifiers[59] = 162
         edgeArmed = false // Exercise the hotkey without moving the real desktop pointer.
         let hotkey = CGEvent(keyboardEventSource: nil, virtualKey: 40, keyDown: true)!
         hotkey.flags = [.maskControl, .maskAlternate, .maskCommand]
         _ = handleTap(type: .keyDown, event: hotkey)
-        precondition(!active && heldKeys.isEmpty && sentModifiers.isEmpty && pressedButtons.isEmpty)
+        precondition(!active && heldKeys.isEmpty && heldModifiers.isEmpty && pressedButtons.isEmpty)
     }
 }
 KvmHelper().checkCameraDrag()
@@ -56,6 +56,30 @@ extension KvmHelper {
         }
         let ctrl = CGEventFlags.maskControl.rawValue, alt = CGEventFlags.maskAlternate.rawValue
         let cmd = CGEventFlags.maskCommand.rawValue
+        emit(["check":"command"])
+        for (code, mask) in [(UInt16(55), UInt64(NX_DEVICELCMDKEYMASK)), (54, UInt64(NX_DEVICERCMDKEYMASK))] {
+            edge(.flagsChanged,code,cmd|mask)
+            edge(.flagsChanged,code,0)
+            for letter: UInt16 in [2, 15] { // D, R
+                edge(.flagsChanged,code,cmd|mask)
+                edge(.keyDown,letter,cmd|mask)
+                edge(.keyUp,letter,cmd|mask)
+                edge(.flagsChanged,code,0)
+            }
+        }
+        // Both physical Command keys share Win. Remapping must respect a held key's owner.
+        edge(.flagsChanged,55,cmd|8)
+        edge(.flagsChanged,54,cmd|24)
+        handleOnMain(command:["action":"leftCommandIsWin","enabled":false])
+        edge(.flagsChanged,54,cmd|8)
+        edge(.flagsChanged,55,0)
+        edge(.flagsChanged,55,cmd|8)
+        edge(.keyDown,9,cmd|8)
+        edge(.keyUp,9,cmd|8)
+        edge(.flagsChanged,55,0)
+        edge(.flagsChanged,54,cmd|16)
+        edge(.flagsChanged,54,0)
+        emit(["check":"end-command"])
         emit(["check":"modifiers"])
         for _ in 0..<25 {
             edge(.flagsChanged,59,ctrl|1); edge(.flagsChanged,59,ctrl|1); edge(.flagsChanged,59,0)

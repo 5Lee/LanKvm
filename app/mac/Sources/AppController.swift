@@ -22,6 +22,7 @@ final class AppController: NSObject {
     private let helperWriter = DispatchQueue(label: "lankvm.helper.commands")
     private var lockReturn = UserDefaults.standard.bool(forKey: "gameLock")
     private var reverseWindowsWheel = (UserDefaults.standard.object(forKey: "reverseWindowsWheel") as? Bool) ?? true
+    private var leftCommandAsControl = UserDefaults.standard.bool(forKey: "leftCommandAsControl")
     private var diagnostics: DiagnosticLog?
     private var helper: Process?
     private var helperBuffer = Data()
@@ -198,7 +199,7 @@ final class AppController: NSObject {
         helperBuffer.removeAll()
         let process = Process()
         process.executableURL = helperBinary
-        process.arguments = ["--no-prompt"]
+        process.arguments = leftCommandAsControl ? ["--no-prompt"] : ["--no-prompt", "--left-command-win"]
         let output = Pipe()
         process.standardOutput = output
         process.standardInput = Pipe()
@@ -775,6 +776,11 @@ final class AppController: NSObject {
         wheelItem.state = reverseWindowsWheel ? .on : .off
         menu.addItem(wheelItem)
 
+        let commandItem = NSMenuItem(title: "左 ⌘ 在 Windows 中用作 Ctrl", action: #selector(toggleLeftCommand), keyEquivalent: "")
+        commandItem.target = self
+        commandItem.state = leftCommandAsControl ? .on : .off
+        menu.addItem(commandItem)
+
         let gameItem = NSMenuItem(title: "游戏锁屏（快捷键返回 Mac）", action: #selector(toggleGameLock), keyEquivalent: "")
         gameItem.target = self
         gameItem.state = lockReturn ? .on : .off
@@ -859,6 +865,13 @@ final class AppController: NSObject {
     @objc private func toggleWheelDirection() {
         reverseWindowsWheel.toggle()
         UserDefaults.standard.set(reverseWindowsWheel, forKey: "reverseWindowsWheel")
+        refreshMenu()
+    }
+
+    @objc private func toggleLeftCommand() {
+        leftCommandAsControl.toggle()
+        UserDefaults.standard.set(leftCommandAsControl, forKey: "leftCommandAsControl")
+        sendHelper(["action": "leftCommandIsWin", "enabled": !leftCommandAsControl])
         refreshMenu()
     }
 

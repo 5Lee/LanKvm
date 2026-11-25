@@ -95,7 +95,7 @@ def run():
         compile_swift(tmp / "helper-check", tmp / "main.swift", MAC / "FileTransfer.swift", MAC / "WindowsClient.swift")
         with ThreadingHTTPServer(("127.0.0.1", 0), InterruptedDownload) as partial:
             threading.Thread(target=partial.serve_forever, daemon=True).start()
-            result = subprocess.check_output([tmp / "helper-check", str(partial.server_port)], text=True, timeout=30)
+            result = subprocess.check_output([tmp / "helper-check", str(partial.server_port), "--left-command-win"], text=True, timeout=30)
             partial.shutdown()
         records = [json.loads(line) for line in result.splitlines()]
         assert {"check": "clipboard-tree-passed"} in records
@@ -116,6 +116,14 @@ def run():
         assert observed == expected
         print("PASS standalone Ctrl/Alt, duplicate notifications, shared Ctrl, right-side and missed modifier events")
 
+        command_records = records[records.index({"check": "command"}) + 1:records.index({"check": "end-command"})]
+        win_tap = [(91, True), (91, False)]
+        def chord(modifier, key):
+            return [(modifier, True), (key, True), (key, False), (modifier, False)]
+        command_edges = (win_tap + chord(91, 68) + chord(91, 82)) * 2
+        command_edges += win_tap + chord(162, 86) + win_tap
+        assert command_records == [dict(type="key", vk=vk, down=down) for vk, down in command_edges]
+
         start = records.index({"check": "missing-up"}) + 1
         stop = records.index({"check": "end-missing-up"})
         key_records = records[start:stop]
@@ -125,7 +133,7 @@ def run():
                      (87, True), (87, False)]
         assert key_records == [dict(type="key", vk=vk, down=down) for vk, down in key_edges]
         key_stream = tmp / "recovered-keys.jsonl"
-        key_stream.write_text("".join(json.dumps(e) + "\n" for e in key_records))
+        key_stream.write_text("".join(json.dumps(e) + "\n" for e in command_records + key_records))
 
         for _ in range(20):
             http = ThreadingHTTPServer(("127.0.0.1", 0), Http)
@@ -162,7 +170,7 @@ dispatchMain()
         assert [e for transport,e in events if transport == "http" and e.get("op") == "key"] == [
             dict(op="key", vk=162, down=True), dict(op="key", vk=162, down=False)]
         assert [e for transport,e in events if transport == "tcp"] == [
-            *[dict(op="key", vk=vk, down=down) for vk, down in key_edges],
+            *[dict(op="key", vk=vk, down=down) for vk, down in command_edges + key_edges],
             *[dict(op="wheel", delta=delta, horizontal=horizontal) for delta, horizontal in
               [(-120, False), (240, False), (120, True), (120, False), (-240, False), (-120, True)]],
             dict(op="down", button="right"), *[dict(op="moveRel", dx=2, dy=-1)] * 2000,
@@ -173,6 +181,7 @@ dispatchMain()
             dict(op="moveRel", dx=7, dy=2)]
         assert events[-1][1]["op"] == "release"
         print("PASS missing W release reaches receiver while D stays held; late repeats, re-press and tap recovery")
+        print("PASS both Command keys, standalone Win, Win+D/R, overlapping keys and optional left Ctrl+V")
         print("PASS reverse and matched vertical wheel, horizontal unchanged, no forwarding on Mac")
         print("PASS anonymous discovery, serialized HTTP, ordered key-up, TCP handshake, 2000 individual right-drag samples, ordinary moves coalesced, motion during pending clipboard transfer, disconnect")
 
