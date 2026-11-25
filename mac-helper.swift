@@ -86,8 +86,6 @@ private func keyVK(_ keycode: Int64) -> Int? {
     case 50: return 192 // `
     case 51: return 8   // Backspace
     case 53: return 27  // Escape
-    case 54: return 91  // right Command -> Win (VK_LWIN)
-    case 55: return 162 // left Command -> Ctrl
     case 56: return 160 // left Shift
     case 57: return 20  // Caps Lock
     case 58: return 164 // left Option -> Alt
@@ -201,9 +199,12 @@ final class KvmHelper {
     private var remoteEstimateX = 0.0
     private var remoteEstimateY = 0.0
 
-    private var heldModifierCodes = Set<Int64>()
-    private var sentModifiers = Set<Int>()
-    private var sentKeys = Set<Int>()
+    private var heldModifiers: [Int64: Int] = [:] // physical code to the VK chosen at press time
+    private var leftCommandIsWin = CommandLine.arguments.contains("--left-command-win")
+    private var heldKeys: [CGKeyCode: Int] = [:]
+    private var hardwareKeys = Set<CGKeyCode>()
+    private var keyCheckTimer: Timer?
+    private let hardwareKeyDown: (CGKeyCode) -> Bool
     private var pressedButtons = Set<String>()
     private var lockReturn = false
     private var cursorReportTime = -Double.infinity
@@ -217,6 +218,10 @@ final class KvmHelper {
     private var lastClipboardChangeCount = 0
 
     private lazy var clipboard = MacClipboard()
+
+    init(hardwareKeyDown: @escaping (CGKeyCode) -> Bool = { CGEventSource.keyState(.hidSystemState, key: $0) }) {
+        self.hardwareKeyDown = hardwareKeyDown
+    }
 
     func run() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -309,6 +314,8 @@ final class KvmHelper {
             if let mode = command["mode"] as? String {
                 setEdgeMode(mode)
             }
+        case "leftCommandIsWin":
+            if let enabled = command["enabled"] as? Bool { leftCommandIsWin = enabled }
         case "lockReturn":
             lockReturn = command["enabled"] as? Bool == true
         case "cursor":
@@ -450,8 +457,7 @@ final class KvmHelper {
             edgeArmed = false
             returnArmed = false
             remoteValid = false
-            heldModifierCodes.removeAll()
-            sentModifiers.removeAll()
+            heldModifiers.removeAll()
             activateForCursorHiding()
             hideCursor()
         } else {
@@ -463,12 +469,17 @@ final class KvmHelper {
                 emit(["type": "mouse", "kind": "up", "button": button])
             }
             pressedButtons.removeAll()
-            for vk in sentKeys.sorted() {
+            keyCheckTimer?.invalidate()
+            keyCheckTimer = nil
+            hardwareKeys.removeAll()
+            for vk in Set(heldKeys.values).sorted() {
                 emit(["type": "key", "vk": vk, "down": false])
             }
-            sentKeys.removeAll()
-            flushSentModifierUps()
-            heldModifierCodes.removeAll()
+            heldKeys.removeAll()
+            for vk in Set(heldModifiers.values).sorted() {
+                emit(["type": "key", "vk": vk, "down": false])
+            }
+            heldModifiers.removeAll()
             showCursor()
             restorePreviousApp()
         }
@@ -533,53 +544,50 @@ final class KvmHelper {
         }
     }
 
-    private func flushSentModifierUps() {
-        for vk in sentModifiers {
-            emit(["type": "key", "vk": vk, "down": false])
-        }
-        sentModifiers.removeAll()
-    }
-
     /// Reconcile the flags on each shortcut as well as flagsChanged. A modifier
     /// may already be held on entry, and two Mac keys can own the same Windows Ctrl.
     private func syncModifiers(_ flags: CGEventFlags, changed: Int64? = nil, directDown: Bool? = nil) {
-        var physical = Set<Int64>()
-        var wanted = Set<Int>()
+        var physical: [Int64: Int] = [:]
         for pair in modifierPairs {
             let sides = [pair.left, pair.right]
             let hasSideFlags = flags.rawValue & (pair.left.mask | pair.right.mask) != 0
             let hasAggregate = flags.contains(pair.flag)
-            let knownSide = sides.contains { heldModifierCodes.contains($0.code) }
+            let knownSide = sides.contains { heldModifiers[$0.code] != nil }
             for side in sides {
                 let held: Bool
                 if let directDown, sides.contains(where: { $0.code == changed }) {
-                    held = side.code == changed ? directDown : heldModifierCodes.contains(side.code)
+                    held = side.code == changed ? directDown : heldModifiers[side.code] != nil
                 } else if hasSideFlags {
                     held = flags.rawValue & side.mask != 0
                 } else if hasAggregate {
                     if changed == pair.left.code || changed == pair.right.code {
-                        if side.code == changed && sides.allSatisfy({ heldModifierCodes.contains($0.code) }) {
+                        if side.code == changed && sides.allSatisfy({ heldModifiers[$0.code] != nil }) {
                             held = CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(side.code))
                         } else {
-                            held = side.code == changed || heldModifierCodes.contains(side.code)
+                            held = side.code == changed || heldModifiers[side.code] != nil
                         }
                     } else {
-                        held = knownSide ? heldModifierCodes.contains(side.code) : side.code == pair.left.code
+                        held = knownSide ? heldModifiers[side.code] != nil : side.code == pair.left.code
                     }
                 } else {
                     held = false
                 }
-                if held { physical.insert(side.code); wanted.insert(side.vk) }
+                if held {
+                    let configuredVK = side.code == 55 && leftCommandIsWin ? 91 : side.vk
+                    physical[side.code] = heldModifiers[side.code] ?? configuredVK
+                }
             }
         }
+        guard physical != heldModifiers else { return }
+        let sentModifiers = Set(heldModifiers.values)
+        let wanted = Set(physical.values)
         for vk in sentModifiers.subtracting(wanted).sorted() {
             emit(["type": "key", "vk": vk, "down": false])
         }
         for vk in wanted.subtracting(sentModifiers).sorted() {
             emit(["type": "key", "vk": vk, "down": true])
         }
-        heldModifierCodes = physical
-        sentModifiers = wanted
+        heldModifiers = physical
     }
 
     private func handleKey(event: CGEvent, down: Bool) {
@@ -591,8 +599,46 @@ final class KvmHelper {
         }
         syncModifiers(event.flags)
         guard let vk = keyVK(keycode) else { return }
-        if down { sentKeys.insert(vk) } else { sentKeys.remove(vk) }
-        emit(["type": "key", "vk": vk, "down": down])
+        let code = CGKeyCode(keycode)
+        guard down else {
+            releaseKey(code)
+            return
+        }
+        let repeating = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if repeating && heldKeys[code] == nil && !hardwareKeyDown(code) { return }
+        // A fresh press of an already-held physical key implies a missed release.
+        if !repeating && hardwareKeys.contains(code) { releaseKey(code) }
+        heldKeys[code] = vk
+        emit(["type": "key", "vk": vk, "down": true])
+        if !hardwareKeys.contains(code) && hardwareKeyDown(code) {
+            hardwareKeys.insert(code)
+            if keyCheckTimer == nil {
+                let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in self?.checkKeyReleases() }
+                RunLoop.main.add(timer, forMode: .common)
+                keyCheckTimer = timer
+            }
+        }
+    }
+
+    private func releaseKey(_ code: CGKeyCode) {
+        guard let vk = heldKeys.removeValue(forKey: code) else { return }
+        hardwareKeys.remove(code)
+        if hardwareKeys.isEmpty {
+            keyCheckTimer?.invalidate()
+            keyCheckTimer = nil
+        }
+        // Return and keypad Enter, for example, share one Windows virtual key.
+        if !heldKeys.values.contains(vk) {
+            emit(["type": "key", "vk": vk, "down": false])
+        }
+    }
+
+    private func checkKeyReleases() {
+        // Only consult HID for keys actually observed down there. Remapped or
+        // software-generated keys may have no corresponding hardware state.
+        for code in hardwareKeys where !hardwareKeyDown(code) {
+            releaseKey(code)
+        }
     }
 
     private func setClipboardEnabled(_ enabled: Bool) {
@@ -902,6 +948,7 @@ final class KvmHelper {
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            checkKeyReleases()
             return Unmanaged.passUnretained(event)
         }
 

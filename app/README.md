@@ -73,6 +73,7 @@ macOS 把子进程的权限算在**父进程**头上。输入的 helper 是 LanK
 - **鼠标移到 Mac 屏幕边缘** → 自动进入 Windows
 - **移到 Windows 屏幕对应边缘** → 自动回到 Mac
 - 菜单栏可以切换 Windows 在左边/右边/两边，或关闭边缘切换
+- 「Windows 纵向滚轮与 Mac 相反」默认勾选。同样向前转动滚轮，两边页面的上下滚动方向相反。取消勾选即可跟随 Mac，选项即时生效并自动保存。横向滚动沿用原方向。
 - **`⌃⌥⌘K`**（Control+Option+Command+K）→ 立刻交还 Mac
 - 菜单栏 **Return to Mac now** → 同样立刻交还
 
@@ -88,16 +89,12 @@ macOS 把子进程的权限算在**父进程**头上。输入的 helper 是 LanK
 |---|---|---|
 | Control | **Ctrl** | `Ctrl+C` 复制 |
 | Option | **Alt** | `Alt+Tab` 切换窗口 |
-| 右 Command (⌘) | **Win** | **右⌘ + D** = `Win+D` 显示桌面 |
+| 左、右 Command (⌘) | **Win** | 单按打开开始菜单，`⌘D` 显示桌面，`⌘R` 打开「运行」 |
 | Shift | Shift | |
-| 左 Command (⌘) | Ctrl | 兼容 Mac 习惯 |
 
-**注意 `Win` 键是右边的 ⌘**（左 ⌘ 映射成 Ctrl）。所以「显示桌面」= **右⌘ + D**。
+默认用 Mac 键盘上的 `Control+C`、`Control+V` 在 Windows 复制和粘贴。若习惯左 ⌘+C/V，可在 Mac 的 LanKvm 菜单栏勾选「左 ⌘ 在 Windows 中用作 Ctrl」。右 ⌘ 始终对应 Win，选择会自动保存。
 
 `Alt+Tab`、`Ctrl+Shift+Esc`、`Win+E`、`Win+R` 这些都可用。
-
-> 早期版本把右 ⌘ 映射成 **右 Win 键**（`VK_RWIN`），而 Windows 不认右 Win 的组合键，
-> 导致 `Win+D` 之类的快捷键失效。已改为标准的左 Win 键（`VK_LWIN`）。
 
 Mac 鼠标在控制 Windows 时会自动隐藏，不会出现两个指针。
 
